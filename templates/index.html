@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>SANUPS E11A – Industrial Monitor</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #0d1117;
+      --panel: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --muted: #8b949e;
+      --blue: #58a6ff;
+      --green: #3fb950;
+      --yellow: #d2991d;
+      --red: #f85149;
+      --radius: 8px;
+      --shadow: 0 1px 3px rgba(0,0,0,0.4);
+    }
+    * { margin:0; padding:0; box-sizing:border-box; font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+    body { background: var(--bg); color: var(--text); padding: 12px; min-height:100vh; display:flex; justify-content:center; }
+    .container { max-width: 1200px; width:100%; }
+    .topbar { background: var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:12px 16px; display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; }
+    .topbar .title { font-weight:600; font-size:1.1rem; color: var(--blue); letter-spacing:0.5px; }
+    .topbar .status { display:flex; gap:12px; font-size:0.8rem; color: var(--muted); }
+    .led { width:10px; height:10px; border-radius:50%; display:inline-block; margin-right:4px; }
+    .led.green { background:var(--green); box-shadow:0 0 6px rgba(63,185,80,0.6); }
+    .led.yellow { background:var(--yellow); box-shadow:0 0 6px rgba(210,153,29,0.6); }
+    .led.red { background:var(--red); box-shadow:0 0 6px rgba(248,81,73,0.6); animation: blink 1s infinite; }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.4} }
+    .tabs { display:flex; gap:4px; margin-bottom:12px; }
+    .tab { flex:1; padding:8px; background:var(--panel); border:1px solid var(--border); border-radius:6px; text-align:center; color:var(--muted); cursor:pointer; font-size:0.8rem; font-weight:500; transition:0.2s; }
+    .tab.active { background:#1f2a37; color:var(--blue); border-color:var(--blue); }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:12px; margin-bottom:12px; }
+    .card { background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:14px; box-shadow:var(--shadow); }
+    .card .header { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+    .card .label { font-size:0.7rem; text-transform:uppercase; letter-spacing:1px; color:var(--muted); }
+    .card .badge { font-size:0.65rem; padding:2px 8px; border-radius:10px; font-weight:600; }
+    .badge.ok { background:rgba(63,185,80,0.15); color:var(--green); }
+    .badge.warn { background:rgba(210,153,29,0.15); color:var(--yellow); }
+    .badge.crit { background:rgba(248,81,73,0.15); color:var(--red); }
+    .card .value { font-size:1.8rem; font-weight:700; font-family:'Cascadia Code', 'Consolas', monospace; }
+    .card .unit { font-size:0.9rem; color:var(--muted); margin-left:4px; }
+    .card .sub { font-size:0.7rem; color:var(--muted); margin-top:4px; }
+    .progress { margin-top:6px; }
+    .bar { height:5px; background:#21262d; border-radius:3px; overflow:hidden; }
+    .fill { height:100%; border-radius:3px; transition: width 0.5s; }
+    .fill.green { background:var(--green); }
+    .fill.yellow { background:var(--yellow); }
+    .fill.red { background:var(--red); }
+    canvas { background:#0d1117; border-radius:6px; margin-top:8px; }
+    .btn { padding:6px 16px; background:#21262d; border:1px solid var(--border); border-radius:6px; color:var(--text); cursor:pointer; font-size:0.8rem; font-weight:500; transition:0.2s; }
+    .btn:hover { background:#30363d; }
+    .btn.active { background:#da3633; border-color:#da3633; }
+    .analysis-grid { display:grid; grid-template-columns: repeat(2,1fr); gap:12px; margin-top:12px; }
+    .stat { background:#0d1117; padding:12px; border-radius:6px; text-align:center; }
+    .stat .num { font-size:1.4rem; font-weight:700; font-family:'Cascadia Code', monospace; }
+    .stat .lab { font-size:0.7rem; color:var(--muted); }
+    input { width:80px; padding:4px; background:#21262d; border:1px solid var(--border); color:var(--text); border-radius:4px; text-align:center; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Top Bar -->
+    <div class="topbar">
+      <div class="title">🔌 SANUPS E11A <span style="color:var(--muted); font-weight:400;">| Industrial Monitor</span></div>
+      <div class="status">
+        <span><span class="led green" id="ledMode"></span> UPS: <span id="txtMode">LINE</span></span>
+        <span><span class="led green" id="ledComm"></span> RS-232: ACTIVE</span>
+        <span><span class="led green" id="ledSys"></span> System: NORMAL</span>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab('monitor')">📊 Monitoring</div>
+      <div class="tab" onclick="switchTab('analysis')">📈 Power Analysis</div>
+    </div>
+
+    <!-- MONITORING TAB -->
+    <div id="tab-monitor">
+      <div class="grid">
+        <!-- Power Card -->
+        <div class="card">
+          <div class="header"><span class="label">Output Power</span><span class="badge ok" id="powerBadge">NOMINAL</span></div>
+          <div class="value"><span id="powerVal">300</span><span class="unit">W</span></div>
+          <div class="sub">Load: <span id="loadPct">20</span>%</div>
+          <div class="progress"><div class="bar"><div class="fill green" id="powerBar" style="width:20%"></div></div></div>
+        </div>
+        <!-- Voltage Card -->
+        <div class="card">
+          <div class="header"><span class="label">Output Voltage</span><span class="badge ok">STABLE</span></div>
+          <div class="value"><span id="voltVal">220.0</span><span class="unit">V</span></div>
+          <div class="sub">Input: <span id="inputV">220.0</span> V</div>
+        </div>
+        <!-- Battery Card -->
+        <div class="card">
+          <div class="header"><span class="label">Battery</span><span class="badge ok" id="battBadge">CHARGED</span></div>
+          <div class="value"><span id="battV">13.8</span><span class="unit">V</span></div>
+          <div class="sub">Capacity: <span id="battPct">85</span>%</div>
+          <div class="progress"><div class="bar"><div class="fill green" id="battBar" style="width:85%"></div></div></div>
+        </div>
+        <!-- Temperature Card -->
+        <div class="card">
+          <div class="header"><span class="label">Temperature</span><span class="badge ok" id="tempBadge">NORMAL</span></div>
+          <div class="value"><span id="tempVal">32.0</span><span class="unit">°C</span></div>
+          <div class="sub">Frequency: <span id="freqVal">50.0</span> Hz</div>
+        </div>
+      </div>
+
+      <!-- Alarms & Grid Control -->
+      <div class="card" style="margin-bottom:12px;">
+        <div id="alarmBox" style="display:none; color:var(--red); font-weight:600;">⚠️ <span id="alarmText"></span></div>
+        <button class="btn" id="gridBtn" onclick="toggleGrid()" style="margin-top:8px;">🔌 Grid: ON</button>
+      </div>
+
+      <!-- Charts -->
+      <div class="card"><canvas id="powerChart"></canvas></div>
+      <div class="card"><canvas id="voltageChart"></canvas></div>
+      <div class="card"><canvas id="battChart"></canvas></div>
+    </div>
+
+    <!-- POWER ANALYSIS TAB -->
+    <div id="tab-analysis" style="display:none;">
+      <div class="card">
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+          <span>Electricity Rate ($/kWh):</span>
+          <input id="rateInput" type="number" value="0.12" step="0.01" onchange="updateAnalysis()">
+        </div>
+        <div class="analysis-grid">
+          <div class="stat"><div class="num" id="anaPower">--</div><div class="lab">Current Power</div></div>
+          <div class="stat"><div class="num" id="dailyCost">--</div><div class="lab">Daily Cost</div></div>
+          <div class="stat"><div class="num" id="monthlyCost">--</div><div class="lab">Monthly Cost</div></div>
+          <div class="stat"><div class="num" id="efficiency">--</div><div class="lab">Efficiency</div></div>
+        </div>
+      </div>
+      <div class="card"><canvas id="analysisChart"></canvas></div>
+    </div>
+  </div>
+
+  <script>
+    let powerChart, voltageChart, battChart, analysisChart;
+
+    function createCharts() {
+      const common = { responsive: true, maintainAspectRatio: false, scales: { x: { ticks: { color: '#8b949e', maxTicksLimit: 10 } }, y: { beginAtZero: true, ticks: { color: '#8b949e' } } }, plugins: { legend: { labels: { color: '#e6edf3' } } } };
+      
+      powerChart = new Chart(document.getElementById('powerChart'), { type: 'line', data: { labels: [], datasets: [{ label: 'Power (W)', borderColor: '#58a6ff', data: [], tension: 0.2, pointRadius: 0 }] }, options: { ...common, scales: { ...common.scales, y: { ...common.scales.y, max: 500 } } } });
+      
+      voltageChart = new Chart(document.getElementById('voltageChart'), { type: 'line', data: { labels: [], datasets: [{ label: 'Output (V)', borderColor: '#3fb950', data: [], tension: 0.2, pointRadius: 0 }, { label: 'Input (V)', borderColor: '#d2991d', data: [], tension: 0.2, pointRadius: 0 }] }, options: { ...common, scales: { ...common.scales, y: { ...common.scales.y, min: 200, max: 240 } } } });
+      
+      battChart = new Chart(document.getElementById('battChart'), { type: 'line', data: { labels: [], datasets: [{ label: 'Battery (V)', borderColor: '#a371f7', data: [], tension: 0.2, pointRadius: 0, yAxisID: 'y' }, { label: 'Temp (°C)', borderColor: '#f85149', data: [], tension: 0.2, pointRadius: 0, yAxisID: 'y1' }] }, options: { ...common, scales: { y: { beginAtZero: true, max: 15, ticks: { color: '#8b949e' }, title: { display: true, text: 'Voltage', color: '#8b949e' } }, y1: { position: 'right', min: 20, max: 40, ticks: { color: '#8b949e' }, title: { display: true, text: 'Temp (°C)', color: '#8b949e' }, grid: { display: false } } } } });
+      
+      analysisChart = new Chart(document.getElementById('analysisChart'), { type: 'line', data: { labels: [], datasets: [{ label: 'Power (W)', borderColor: '#58a6ff', data: [], tension: 0.2, pointRadius: 0 }] }, options: common });
+    }
+
+    function updateCharts(data) {
+      const h = data.history;
+      [powerChart, voltageChart, battChart, analysisChart].forEach(c => {
+        c.data.labels = h.timestamps;
+      });
+      powerChart.data.datasets[0].data = h.output_power;
+      voltageChart.data.datasets[0].data = h.output_voltage;
+      voltageChart.data.datasets[1].data = h.input_voltage;
+      battChart.data.datasets[0].data = h.battery_voltage;
+      battChart.data.datasets[1].data = h.temperature;
+      analysisChart.data.datasets[0].data = h.output_power;
+      [powerChart, voltageChart, battChart, analysisChart].forEach(c => c.update());
+    }
+
+    function updateUI(d) {
+      const l = d.live;
+      document.getElementById('powerVal').textContent = l.output_power.toFixed(0);
+      document.getElementById('voltVal').textContent = l.output_voltage.toFixed(1);
+      document.getElementById('inputV').textContent = l.input_voltage.toFixed(1);
+      document.getElementById('battV').textContent = l.battery_voltage.toFixed(1);
+      document.getElementById('tempVal').textContent = l.temperature.toFixed(1);
+      document.getElementById('freqVal').textContent = l.frequency.toFixed(1);
+
+      // Battery percentage estimation
+      let battPct = Math.min(100, Math.max(0, ((l.battery_voltage - 10.5) / (13.8 - 10.5)) * 100));
+      document.getElementById('battPct').textContent = battPct.toFixed(0);
+      document.getElementById('battBar').style.width = battPct + '%';
+      let battBadge = document.getElementById('battBadge');
+      battBadge.className = 'badge ' + (battPct < 20 ? 'crit' : battPct < 50 ? 'warn' : 'ok');
+      battBadge.textContent = battPct < 20 ? 'LOW' : battPct < 50 ? 'MEDIUM' : 'CHARGED';
+      document.getElementById('battBar').className = 'fill ' + (battPct < 20 ? 'red' : battPct < 50 ? 'yellow' : 'green');
+
+      // Load percentage
+      let loadPct = (l.output_power / 1500) * 100;
+      document.getElementById('loadPct').textContent = loadPct.toFixed(0);
+      document.getElementById('powerBar').style.width = Math.min(100, loadPct) + '%';
+      let powerBadge = document.getElementById('powerBadge');
+      powerBadge.className = 'badge ' + (l.output_power > 1000 ? (l.output_power > 1500 ? 'crit' : 'warn') : 'ok');
+      powerBadge.textContent = l.output_power > 1500 ? 'OVERLOAD' : l.output_power > 1000 ? 'HIGH' : 'NOMINAL';
+      document.getElementById('powerBar').className = 'fill ' + (l.output_power > 1500 ? 'red' : l.output_power > 1000 ? 'yellow' : 'green');
+
+      // Temperature badge
+      let tempBadge = document.getElementById('tempBadge');
+      tempBadge.className = 'badge ' + (l.temperature > 45 ? 'crit' : l.temperature > 38 ? 'warn' : 'ok');
+      tempBadge.textContent = l.temperature > 45 ? 'HIGH' : l.temperature > 38 ? 'ELEVATED' : 'NORMAL';
+
+      // Mode & LEDs
+      document.getElementById('txtMode').textContent = l.mode;
+      document.getElementById('ledMode').className = 'led ' + (l.mode === 'LINE' ? 'green' : 'yellow');
+      document.getElementById('ledComm').className = 'led green';
+      document.getElementById('ledSys').className = 'led ' + (l.alarms.length ? 'red' : 'green');
+
+      // Alarms
+      let alarmBox = document.getElementById('alarmBox');
+      let alarmText = document.getElementById('alarmText');
+      if (l.alarms.length) {
+        alarmBox.style.display = 'block';
+        alarmText.textContent = l.alarms.join(', ');
+      } else {
+        alarmBox.style.display = 'none';
+      }
+
+      // Grid button
+      let gridBtn = document.getElementById('gridBtn');
+      gridBtn.textContent = '🔌 Grid: ' + (l.input_voltage > 10 ? 'ON' : 'OFF');
+      gridBtn.className = l.input_voltage > 10 ? 'btn' : 'btn active';
+
+      // Analysis numbers
+      const rate = parseFloat(document.getElementById('rateInput').value) || 0.12;
+      const powerKw = l.output_power / 1000;
+      document.getElementById('anaPower').textContent = l.output_power + ' W';
+      document.getElementById('dailyCost').textContent = '$' + (powerKw * 24 * rate).toFixed(2);
+      document.getElementById('monthlyCost').textContent = '$' + (powerKw * 24 * 30 * rate).toFixed(2);
+      let eff = l.input_voltage > 10 ? ((l.output_power / (l.input_voltage * 1.5)) * 100).toFixed(1) : '--';
+      document.getElementById('efficiency').textContent = eff + '%';
+    }
+
+    async function fetchData() {
+      try {
+        const res = await fetch('/api/data');
+        const data = await res.json();
+        updateUI(data);
+        updateCharts(data);
+      } catch(e) { console.error(e); }
+    }
+
+    function toggleGrid() {
+      fetch('/api/set_grid', { method: 'POST' });
+    }
+
+    function switchTab(tab) {
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.getElementById('tab-monitor').style.display = tab === 'monitor' ? 'block' : 'none';
+      document.getElementById('tab-analysis').style.display = tab === 'analysis' ? 'block' : 'none';
+      document.querySelector(`.tab:nth-child(${tab === 'monitor' ? 1 : 2})`).classList.add('active');
+    }
+
+    window.onload = () => {
+      createCharts();
+      setInterval(fetchData, 1000);
+      fetchData();
+    };
+  </script>
+</body>
+</html>
